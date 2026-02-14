@@ -558,6 +558,89 @@
     <div class="toast" id="toast"></div>
 
     <script>
+        // IndexedDB setup
+        const DB_NAME = 'WellnessTrackerDB';
+        const DB_VERSION = 1;
+        let db;
+
+        // Initialize IndexedDB
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                    db = request.result;
+                    resolve(db);
+                };
+
+                request.onupgradeneeded = (event) => {
+                    db = event.target.result;
+                    
+                    // Create object stores for each category
+                    const categories = ['sleep', 'naps', 'meditation', 'food', 'exercise'];
+                    categories.forEach(category => {
+                        if (!db.objectStoreNames.contains(category)) {
+                            const objectStore = db.createObjectStore(category, { keyPath: 'id', autoIncrement: true });
+                            objectStore.createIndex('time', 'time', { unique: false });
+                        }
+                    });
+                };
+            });
+        }
+
+        // Get data from IndexedDB
+        function getData(category) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([category], 'readonly');
+                const objectStore = transaction.objectStore(category);
+                const request = objectStore.getAll();
+
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        // Save data to IndexedDB
+        function saveData(category, entry) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([category], 'readwrite');
+                const objectStore = transaction.objectStore(category);
+                const request = objectStore.add(entry);
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        // Delete entry from IndexedDB
+        function deleteEntry(category, id) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([category], 'readwrite');
+                const objectStore = transaction.objectStore(category);
+                const request = objectStore.delete(id);
+
+                request.onsuccess = () => {
+                    displayHistory(category, `${category}-history`);
+                    showToast('Entry deleted successfully');
+                    resolve();
+                };
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        // Clear all data for a category
+        function clearCategory(category) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([category], 'readwrite');
+                const objectStore = transaction.objectStore(category);
+                const request = objectStore.clear();
+
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
+
         // Initialize datetime inputs to current time
         function setCurrentDateTime() {
             const now = new Date();
@@ -591,21 +674,10 @@
             }, 3000);
         }
 
-        // Get data from localStorage
-        function getData(category) {
-            const data = localStorage.getItem(category);
-            return data ? JSON.parse(data) : [];
-        }
-
-        // Save data to localStorage
-        function saveData(category, data) {
-            localStorage.setItem(category, JSON.stringify(data));
-        }
-
         // Display history for a category
-        function displayHistory(category, elementId) {
+        async function displayHistory(category, elementId) {
             const historyElement = document.getElementById(elementId);
-            const data = getData(category);
+            const data = await getData(category);
             
             if (data.length === 0) {
                 historyElement.innerHTML = '<p style="text-align: center; color: #9ca3af;">No entries yet</p>';
@@ -613,12 +685,11 @@
             }
 
             historyElement.innerHTML = '<h3>Recent Entries</h3>' + 
-                data.slice(-10).reverse().map((entry, index) => {
-                    const actualIndex = data.length - 1 - index;
+                data.slice(-10).reverse().map((entry) => {
                     return `
                         <div class="history-item">
                             <div>${formatHistoryEntry(category, entry)}</div>
-                            <button class="delete-btn" onclick="deleteEntry('${category}', ${actualIndex})">Delete</button>
+                            <button class="delete-btn" onclick="deleteEntry('${category}', ${entry.id})">Delete</button>
                         </div>
                     `;
                 }).join('');
@@ -654,97 +725,87 @@
         }
 
         // Sleep form handler
-        document.getElementById('sleep-form').addEventListener('submit', function(e) {
+        document.getElementById('sleep-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const time = document.getElementById('sleep-time').value;
             const duration = parseFloat(document.getElementById('sleep-duration').value);
             
-            const data = getData('sleep');
-            data.push({ time, duration });
-            saveData('sleep', data);
+            await saveData('sleep', { time, duration });
             
-            displayHistory('sleep', 'sleep-history');
+            await displayHistory('sleep', 'sleep-history');
             this.reset();
             setCurrentDateTime();
             showToast('Sleep log added successfully');
         });
 
         // Naps form handler
-        document.getElementById('naps-form').addEventListener('submit', function(e) {
+        document.getElementById('naps-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const time = document.getElementById('naps-time').value;
             const duration = parseInt(document.getElementById('naps-duration').value);
             
-            const data = getData('naps');
-            data.push({ time, duration });
-            saveData('naps', data);
+            await saveData('naps', { time, duration });
             
-            displayHistory('naps', 'naps-history');
+            await displayHistory('naps', 'naps-history');
             this.reset();
             setCurrentDateTime();
             showToast('Nap log added successfully');
         });
 
         // Meditation form handler
-        document.getElementById('meditation-form').addEventListener('submit', function(e) {
+        document.getElementById('meditation-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const time = document.getElementById('meditation-time').value;
             const duration = parseInt(document.getElementById('meditation-duration').value);
             
-            const data = getData('meditation');
-            data.push({ time, duration });
-            saveData('meditation', data);
+            await saveData('meditation', { time, duration });
             
-            displayHistory('meditation', 'meditation-history');
+            await displayHistory('meditation', 'meditation-history');
             this.reset();
             setCurrentDateTime();
             showToast('Meditation log added successfully');
         });
 
         // Food form handler
-        document.getElementById('food-form').addEventListener('submit', function(e) {
+        document.getElementById('food-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const time = document.getElementById('food-time').value;
             const items = Array.from(document.querySelectorAll('input[name="food-items"]:checked'))
                 .map(cb => cb.value);
             const size = document.querySelector('input[name="food-size"]:checked').value;
             
-            const data = getData('food');
-            data.push({ time, items, size });
-            saveData('food', data);
+            await saveData('food', { time, items, size });
             
-            displayHistory('food', 'food-history');
+            await displayHistory('food', 'food-history');
             this.reset();
             setCurrentDateTime();
             showToast('Food log added successfully');
         });
 
         // Exercise form handler
-        document.getElementById('exercise-form').addEventListener('submit', function(e) {
+        document.getElementById('exercise-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const time = document.getElementById('exercise-time').value;
             const types = Array.from(document.querySelectorAll('input[name="exercise-type"]:checked'))
                 .map(cb => cb.value);
             const intensity = document.querySelector('input[name="exercise-intensity"]:checked').value;
             
-            const data = getData('exercise');
-            data.push({ time, types, intensity });
-            saveData('exercise', data);
+            await saveData('exercise', { time, types, intensity });
             
-            displayHistory('exercise', 'exercise-history');
+            await displayHistory('exercise', 'exercise-history');
             this.reset();
             setCurrentDateTime();
             showToast('Exercise log added successfully');
         });
 
         // Export data to CSV
-        function exportData() {
+        async function exportData() {
             const allData = {
-                sleep: getData('sleep'),
-                naps: getData('naps'),
-                meditation: getData('meditation'),
-                food: getData('food'),
-                exercise: getData('exercise')
+                sleep: await getData('sleep'),
+                naps: await getData('naps'),
+                meditation: await getData('meditation'),
+                food: await getData('food'),
+                exercise: await getData('exercise')
             };
 
             let csv = 'Category,Time,Duration,Items,Size/Intensity\n';
@@ -762,11 +823,13 @@
             });
             
             allData.food.forEach(entry => {
-                csv += `Food,"${entry.time}",,"${entry.items.join('; ')}",${entry.size}\n`;
+                const items = entry.items && entry.items.length > 0 ? entry.items.join('; ') : '';
+                csv += `Food,"${entry.time}",,"${items}",${entry.size || ''}\n`;
             });
             
             allData.exercise.forEach(entry => {
-                csv += `Exercise,"${entry.time}",,"${entry.types.join('; ')}",${entry.intensity}\n`;
+                const types = entry.types && entry.types.length > 0 ? entry.types.join('; ') : '';
+                csv += `Exercise,"${entry.time}",,"${types}",${entry.intensity || ''}\n`;
             });
 
             const blob = new Blob([csv], { type: 'text/csv' });
@@ -780,65 +843,53 @@
         }
 
         // Import data from CSV
-        function importData(event) {
+        async function importData(event) {
             const file = event.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = async function(e) {
                 const csv = e.target.result;
                 const lines = csv.split('\n').slice(1); // Skip header
                 
-                const sleepData = getData('sleep');
-                const napsData = getData('naps');
-                const meditationData = getData('meditation');
-                const foodData = getData('food');
-                const exerciseData = getData('exercise');
-
-                lines.forEach(line => {
-                    if (!line.trim()) return;
+                for (const line of lines) {
+                    if (!line.trim()) continue;
                     
                     const parts = line.match(/(".*?"|[^,]+)(?=\s*,|\s*$)/g).map(p => p.replace(/^"|"$/g, ''));
                     const [category, time, duration, items, sizeIntensity] = parts;
 
                     switch(category) {
                         case 'Sleep':
-                            sleepData.push({ time, duration: parseFloat(duration) });
+                            await saveData('sleep', { time, duration: parseFloat(duration) });
                             break;
                         case 'Naps':
-                            napsData.push({ time, duration: parseInt(duration) });
+                            await saveData('naps', { time, duration: parseInt(duration) });
                             break;
                         case 'Meditation':
-                            meditationData.push({ time, duration: parseInt(duration) });
+                            await saveData('meditation', { time, duration: parseInt(duration) });
                             break;
                         case 'Food':
-                            foodData.push({ 
+                            await saveData('food', { 
                                 time, 
                                 items: items.split('; ').filter(i => i), 
                                 size: sizeIntensity 
                             });
                             break;
                         case 'Exercise':
-                            exerciseData.push({ 
+                            await saveData('exercise', { 
                                 time, 
                                 types: items.split('; ').filter(i => i), 
                                 intensity: sizeIntensity 
                             });
                             break;
                     }
-                });
+                }
 
-                saveData('sleep', sleepData);
-                saveData('naps', napsData);
-                saveData('meditation', meditationData);
-                saveData('food', foodData);
-                saveData('exercise', exerciseData);
-
-                displayHistory('sleep', 'sleep-history');
-                displayHistory('naps', 'naps-history');
-                displayHistory('meditation', 'meditation-history');
-                displayHistory('food', 'food-history');
-                displayHistory('exercise', 'exercise-history');
+                await displayHistory('sleep', 'sleep-history');
+                await displayHistory('naps', 'naps-history');
+                await displayHistory('meditation', 'meditation-history');
+                await displayHistory('food', 'food-history');
+                await displayHistory('exercise', 'exercise-history');
 
                 showToast('Data imported successfully');
             };
@@ -846,13 +897,14 @@
         }
 
         // Initialize app
-        window.addEventListener('DOMContentLoaded', function() {
+        window.addEventListener('DOMContentLoaded', async function() {
+            await initDB();
             setCurrentDateTime();
-            displayHistory('sleep', 'sleep-history');
-            displayHistory('naps', 'naps-history');
-            displayHistory('meditation', 'meditation-history');
-            displayHistory('food', 'food-history');
-            displayHistory('exercise', 'exercise-history');
+            await displayHistory('sleep', 'sleep-history');
+            await displayHistory('naps', 'naps-history');
+            await displayHistory('meditation', 'meditation-history');
+            await displayHistory('food', 'food-history');
+            await displayHistory('exercise', 'exercise-history');
         });
 
         // Register service worker for PWA
